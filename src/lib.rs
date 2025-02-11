@@ -12,7 +12,7 @@
 //!
 //! <https://forums.iracing.com/discussion/62/iracing-sdk>
 use core::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use encoding::all::WINDOWS_1252;
 use encoding::{DecoderTrap, Encoding};
 use std::cmp::Ordering;
@@ -46,11 +46,15 @@ pub const IRSDK_UNLIMITED_TIME: f64 = 604800.0;
 /// access Sessions that have the telemetry data in then.
 #[derive(Debug)]
 pub struct Client {
-    conn: Option<Arc<Connection>>,
+    conn: Option<Arc<Mutex<Connection>>>,
     // Incremented each time we issue a new session. Allows for session to determine its expired even if
     // iRacing started a new session.
     session_id: i32,
 }
+
+unsafe impl Send for Client {}
+unsafe impl Sync for Client {}
+
 impl Client {
     /// Creates a new Client
     pub fn new() -> Client {
@@ -63,11 +67,11 @@ impl Client {
     // Returns true if we're now connected (or was already connected), false otherwise
     unsafe fn connect(&mut self) -> bool {
         match &self.conn {
-            Some(c) => c.connected(),
+            Some(c) => c.lock().unwrap().connected(),
             None => match Connection::new() {
                 Ok(c) => {
                     let result = c.connected();
-                    self.conn = Some(Arc::new(c));
+                    self.conn = Some(Arc::new(Mutex::new(c)));
                     result
                 }
                 Err(_) => false,
@@ -116,7 +120,7 @@ impl Client {
         // session. Otherwise we need to poll session fn above.
         match &self.conn {
             Some(c) => {
-                c.wait_for_new_data(wait);
+                c.lock().unwrap().wait_for_new_data(wait);
                 self.session()
             }
             None => {
@@ -169,11 +173,15 @@ pub enum DataUpdateResult {
 #[derive(Debug)]
 pub struct Session {
     session_id: i32,
-    conn: Arc<Connection>,
+    conn: Arc<Mutex<Connection>>,
     last_tick_count: i32,
     data: bytes::BytesMut,
     expired: bool,
 }
+
+unsafe impl Send for Session {}
+unsafe impl Sync for Session {}
+
 impl Session {
     /// Is this session still connected to the iRacing data.
     ///
@@ -187,7 +195,7 @@ impl Session {
     /// # Safety
     /// see details on Session
     pub unsafe fn expired(&self) -> bool {
-        self.expired || (!self.conn.connected())
+        self.expired || (!self.conn.lock().unwrap().connected())
     }
     /// Waits for upto 'wait' amount of time for a new row of data to be available.
     /// The wait value should not exceed an u32's worth of milliseconds, approx ~49 days
@@ -197,7 +205,7 @@ impl Session {
     pub unsafe fn wait_for_data(&mut self, wait: Duration) -> DataUpdateResult {
         let r = self.get_new_data();
         if r == DataUpdateResult::NoUpdate {
-            self.conn.wait_for_new_data(wait);
+            self.conn.lock().unwrap().wait_for_new_data(wait);
             self.get_new_data()
         } else {
             r
@@ -212,7 +220,8 @@ impl Session {
             self.expired = true;
             return DataUpdateResult::SessionExpired;
         }
-        let (buf_hdr, row) = self.conn.lastest();
+        let conn = self.conn.lock().unwrap();
+        let (buf_hdr, row) = conn.lastest();
         match buf_hdr.tick_count.cmp(&self.last_tick_count) {
             Ordering::Greater => {
                 for _tries in 0..2 {
@@ -241,7 +250,7 @@ impl Session {
     /// # Safety
     /// see details on Session
     pub unsafe fn dump_vars(&self) {
-        for var_header in self.conn.variables() {
+        for var_header in self.conn.lock().unwrap().variables() {
             let var = Var {
                 hdr: *var_header,
                 session_id: self.session_id,
@@ -266,7 +275,7 @@ impl Session {
     /// # Safety
     /// see details on Session
     pub unsafe fn find_var(&self, name: &str) -> Option<Var> {
-        for var_header in self.conn.variables() {
+        for var_header in self.conn.lock().unwrap().variables() {
             if var_header.has_name(name) {
                 return Some(Var {
                     hdr: *var_header,
@@ -336,7 +345,7 @@ impl Session {
     /// # Safety
     /// see details on Session
     pub unsafe fn session_info_update(&self) -> i32 {
-        (*self.conn.header).session_info_update
+        (*self.conn.lock().unwrap().header).session_info_update
     }
     /// Returns the current Session info string. This is a Yaml formatted string that you'll
     /// need to parse.
@@ -344,7 +353,8 @@ impl Session {
     /// # Safety
     /// see details on Session
     pub unsafe fn session_info(&self) -> String {
-        let bytes = self.conn.session_info();
+        let conn = self.conn.lock().unwrap();
+        let bytes = conn.session_info();
         // as we're using replace, this should not ever return an error
         WINDOWS_1252.decode(bytes, DecoderTrap::Replace).unwrap()
     }
@@ -362,7 +372,7 @@ impl Session {
         let x = makelong(cmd_msg_id, var1);
         let r = SendNotifyMessageA(
             HWND_BROADCAST,
-            self.conn.broadcast_msg_id,
+            self.conn.lock().unwrap().broadcast_msg_id,
             WPARAM(x as usize),
             LPARAM(var2),
         );
@@ -990,13 +1000,13 @@ mod tests {
         };
         let mut s = Session {
             session_id: 1,
-            conn: Arc::new(Connection {
+            conn: Arc::new(Mutex::new(Connection {
                 file_mapping: HANDLE::default(),
                 shared_mem: ptr::null_mut(),
                 header: ptr::addr_of_mut!(h),
                 new_data: HANDLE::default(),
                 broadcast_msg_id: 1,
-            }),
+            })),
             last_tick_count: 1,
             data: bytes::BytesMut::new(),
             expired: false,
@@ -1092,13 +1102,13 @@ mod tests {
         };
         let mut s = Session {
             session_id: 1,
-            conn: Arc::new(Connection {
+            conn: Arc::new(Mutex::new(Connection {
                 file_mapping: HANDLE::default(),
                 shared_mem: ptr::null_mut(),
                 header: ptr::addr_of_mut!(h),
                 new_data: HANDLE::default(),
                 broadcast_msg_id: 1,
-            }),
+            })),
             last_tick_count: 1,
             data: bytes::BytesMut::new(),
             expired: false,
