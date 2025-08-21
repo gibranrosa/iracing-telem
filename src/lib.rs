@@ -491,7 +491,8 @@ impl Connection {
     unsafe fn buffers(&self) -> &[IrsdkBuf] {
         let l = (*self.header).num_buf as usize;
         assert!(l <= IRSDK_MAX_BUFS);
-        &(*self.header).var_buf[..l]
+        let buf_ptr = (*self.header).var_buf.as_ptr();
+        slice::from_raw_parts(buf_ptr, l)
     }
     // returns the telemetry buffer with the highest tick count, along with the actual data
     // this is the buffer in the shared mem, so you should copy it.
