@@ -1,6 +1,6 @@
 //! iracing-telem is a rust port of the iRacing provided c++ SDK.
 //!
-//! It allows for access to telemetetry data from a running instance of the iRacing simulator
+//! It allows for access to telemetry data from a running instance of the iRacing simulator
 //! As well as the ability to send certain control messages to the simulator (e.g to change
 //! Pitstop settings)
 //!
@@ -8,7 +8,7 @@
 //! issue for the data to not be in the expected locations almost all methods are marked as unsafe.
 //!
 //! Details of the c++ SDK are available on the iRacing forums. Note you will need an active
-//! iRacing subsription to access these.
+//! iRacing subscription to access these.
 //!
 //! <https://forums.iracing.com/discussion/62/iracing-sdk>
 use core::fmt;
@@ -27,6 +27,7 @@ use windows::Win32::System::{Memory, Threading};
 use windows::Win32::UI::WindowsAndMessaging::{RegisterWindowMessageA, SendNotifyMessageA};
 
 pub mod flags;
+pub mod safe;
 
 const IRSDK_MAX_BUFS: usize = 4;
 const IRSDK_MAX_STRING: usize = 32;
@@ -79,7 +80,7 @@ impl Client {
     /// See also wait_for_session.
     ///
     /// # Safety
-    /// Creating a session requires dealing with memory mapped files and c strucutres
+    /// Creating a session requires dealing with memory mapped files and c structures
     /// that are in them. A mismatch between our definition of the struct and iRacings
     /// definition could cause chaos.
     pub unsafe fn session(&mut self) -> Option<Session> {
@@ -103,12 +104,12 @@ impl Client {
             }
         }
     }
-    /// Will wait upto the the supplied wait duration for a iRacing session to be available.
+    /// Will wait up to the the supplied wait duration for a iRacing session to be available.
     /// If the wait timeout's returns None, otherwise returns the new Session.
     /// Wait must fit into a 32bit number of milliseconds, about 49 days. otherwise it'll panic.
     ///
     /// # Safety
-    /// Creating a session requires dealing with memory mapped files and c strucutres
+    /// Creating a session requires dealing with memory mapped files and c structures
     /// that are in them. A mismatch between our definition of the struct and iRacings
     /// definition could cause chaos.
     pub unsafe fn wait_for_session(&mut self, wait: Duration) -> Option<Session> {
@@ -142,7 +143,7 @@ impl Default for Client {
     }
 }
 
-/// The outcome of trying to read a row of telemetery data.
+/// The outcome of trying to read a row of telemetry data.
 #[derive(Debug, PartialEq)]
 pub enum DataUpdateResult {
     /// The data was updated, and the new values are available via value & var_value
@@ -189,7 +190,7 @@ impl Session {
     pub unsafe fn expired(&self) -> bool {
         self.expired || (!self.conn.connected())
     }
-    /// Waits for upto 'wait' amount of time for a new row of data to be available.
+    /// Waits for up to 'wait' amount of time for a new row of data to be available.
     /// The wait value should not exceed an u32's worth of milliseconds, approx ~49 days
     ///
     /// # Safety
@@ -212,7 +213,7 @@ impl Session {
             self.expired = true;
             return DataUpdateResult::SessionExpired;
         }
-        let (buf_hdr, row) = self.conn.lastest();
+        let (buf_hdr, row) = self.conn.latest();
         match buf_hdr.tick_count.cmp(&self.last_tick_count) {
             Ordering::Greater => {
                 for _tries in 0..2 {
@@ -281,7 +282,7 @@ impl Session {
     ///
     /// # Safety
     /// see details on Session
-    pub unsafe fn var_value(&self, var: &Var) -> Value {
+    pub unsafe fn var_value(&'_ self, var: &Var) -> Value<'_> {
         assert_eq!(
             var.session_id, self.session_id,
             "programmer error, Var was issued by a different Session"
@@ -317,7 +318,7 @@ impl Session {
             }
         }
     }
-    /// Read the value of the supplied variable, and convert it to the relevent rust type. The
+    /// Read the value of the supplied variable, and convert it to the relevant rust type. The
     /// rust type can be a primitive such as i32,f32,f64 or one of the bitfield/enums defined
     /// in the flags package.
     ///
@@ -407,7 +408,7 @@ impl Var {
     /// returns the count. This indicates how many instances of the datapoint value
     /// are associated with this variable. Typically its one, but there is a small
     /// subset of points that have more, typically 64 (i.e. one per driver).
-    /// Values for Var's with a count > 1 are returned as slices of the relevent type
+    /// Values for Var's with a count > 1 are returned as slices of the relevant type
     pub fn count(&self) -> usize {
         self.hdr.count as usize
     }
@@ -482,11 +483,11 @@ impl Connection {
             .intersects(flags::StatusField::CONNECTED)
     }
     unsafe fn variables(&self) -> &[IrsdkVarHeader] {
-        let vhbase = self
+        let var_header_base = self
             .shared_mem
             .add((*self.header).var_header_offset as usize)
             as *const IrsdkVarHeader;
-        slice::from_raw_parts(vhbase, (*self.header).num_vars as usize)
+        slice::from_raw_parts(var_header_base, (*self.header).num_vars as usize)
     }
     unsafe fn buffers(&self) -> &[IrsdkBuf] {
         let l = (*self.header).num_buf as usize;
@@ -496,7 +497,7 @@ impl Connection {
     }
     // returns the telemetry buffer with the highest tick count, along with the actual data
     // this is the buffer in the shared mem, so you should copy it.
-    unsafe fn lastest(&self) -> (&IrsdkBuf, &[u8]) {
+    unsafe fn latest(&self) -> (&IrsdkBuf, &[u8]) {
         let b = self.buffers();
         let mut latest = &b[0];
         for buff in b {
@@ -517,7 +518,7 @@ impl Connection {
             .add((*self.header).session_info_offset as usize) as *const u8;
         let mut bytes = std::slice::from_raw_parts(p, (*self.header).session_info_len as usize);
         // session_info_len is the size of the buffer, not necessarily the size of the string
-        // so we have to look for the null terminatior.
+        // so we have to look for the null terminator.
         for i in 0..bytes.len() {
             if bytes[i] == 0 {
                 bytes = &bytes[0..i];
@@ -552,7 +553,7 @@ struct IrsdkHeader {
     status: flags::StatusField, // bitfield using irsdk_StatusField
     tick_rate: i32,             // ticks per second (60 or 360 etc)
 
-    // session information, updated periodicaly
+    // session information, updated periodically
     session_info_update: i32, // Incremented when session info changes
     session_info_len: i32,    // Length in bytes of session info string
     session_info_offset: i32, // Session info, encoded in YAML format
@@ -571,8 +572,8 @@ struct IrsdkHeader {
 #[derive(Clone, Copy, Debug)]
 struct IrsdkVarHeader {
     var_type: VarType, // irsdk_VarType
-    offset: i32,       // offset fron start of buffer row
-    count: i32, // number of entrys (array) so length in bytes would be irsdk_VarTypeBytes[type] * count
+    offset: i32,       // offset from start of buffer row
+    count: i32, // number of entries (array) so length in bytes would be irsdk_VarTypeBytes[type] * count
 
     count_as_time: u8,
     pad: [i8; 3], // (16 byte align)

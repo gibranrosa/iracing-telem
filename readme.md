@@ -12,6 +12,8 @@ crate: <https://crates.io/crates/iracing-telem/>
 The iRacing data is exposed through a memory mapped file. Because of this, and the potential issue
 for the data to not be in the expected locations almost all methods are marked as unsafe.
 
+For a checked, no-`unsafe` consumer API, use `iracing_telem::safe`.
+
 Details of the c++ SDK are available on the iRacing forums.
 Note you will need an active iRacing subsription to access these.
 

@@ -12,6 +12,7 @@ use num::ToPrimitive;
 use num_derive::{FromPrimitive, ToPrimitive};
 
 bitflags! {
+    #[derive(Debug, Clone, Copy)]
     pub struct StatusField:i32 {
         const CONNECTED = 1;
     }
@@ -56,7 +57,7 @@ bitflags! {
         // driver black flags
         const BLACK         = 0x00010000;
         const DISQUALIFY    = 0x00020000;
-        const SERVICABLE    = 0x00040000;   // aka can pit
+        const SERVICEABLE    = 0x00040000;   // aka can pit
         const FURLED        = 0x00080000;
         const REPAIR        = 0x00100000;
 
@@ -142,6 +143,7 @@ pub enum CarLeftRight {
 }
 
 bitflags! {
+    #[derive(Debug)]
     pub struct CameraState:i32 {
         /// The camera tool can only be activated if viewing the session screen (out of car)
         const IS_SESSION_SCREEN     = 0x0001;
@@ -217,9 +219,9 @@ bitflags! {
 /// pit commands only work when in your car.
 #[derive(Debug)]
 pub enum BroadcastMsg {
-    /// car position, group, camera (this is per the SDK docs, but seems like in practice group & camera are revesed)
+    /// car position, group, camera (this is per the SDK docs, but seems like in practice group & camera are reversed)
     CamSwitchPos(CameraFocus, i16, i16),
-    /// driver #, group, camera (this is per the SDK docs, but seems like in practice group & camera are revesed)
+    /// driver #, group, camera (this is per the SDK docs, but seems like in practice group & camera are reversed)
     CamSwitchNum(CameraFocus, i16, i16),
     // irsdk_CameraState, unused, unused
     CamSetState(CameraState),
@@ -234,7 +236,7 @@ pub enum BroadcastMsg {
     /// irsdk_ReloadTexturesMode, carIdx, unused
     ReloadTextures(ReloadTextures),
     /// irsdk_ChatCommandMode, subCommand, unused
-    ChatComand(ChatCommand),
+    ChatCommand(ChatCommand),
     /// irsdk_PitCommandMode, parameter   
     PitCommand(PitCommand),
     /// irsdk_TelemCommandMode, unused, unused        
@@ -260,10 +262,10 @@ impl BroadcastMsg {
                 (3, (*speed, if *slow { 1 } else { 0 }))
             }
             BroadcastMsg::ReplaySetPlayPosition(pos, frame) => (4, (pos.params(), *frame as isize)),
-            BroadcastMsg::ReplaySearch(s) => (5, (s.parms(), 0)),
+            BroadcastMsg::ReplaySearch(s) => (5, (s.params(), 0)),
             BroadcastMsg::ReplaySetState(s) => (6, (s.params(), 0)),
             BroadcastMsg::ReloadTextures(r) => (7, (r.params())),
-            BroadcastMsg::ChatComand(c) => (8, (c.params())),
+            BroadcastMsg::ChatCommand(c) => (8, (c.params())),
             BroadcastMsg::PitCommand(c) => (9, c.params()),
             BroadcastMsg::TelemCommand(t) => (10, (t.params(), 0)),
             BroadcastMsg::FFBCommand(f) => (11, f.params()),
@@ -320,7 +322,7 @@ pub enum ReplaySearch {
     NextIncident,
 }
 impl ReplaySearch {
-    fn parms(&self) -> i16 {
+    fn params(&self) -> i16 {
         self.to_i16().unwrap()
     }
 }
@@ -379,7 +381,7 @@ impl ChatCommand {
 pub enum PitCommand {
     /// Clear all pit checkboxes
     Clear,
-    /// WS: Clean the winshield, using one tear off
+    /// WS: Clean the windshield, using one tear off
     TearOff,
     /// Add fuel, optionally specify the amount to add in liters
     Fuel(Option<i16>),
@@ -395,7 +397,7 @@ pub enum PitCommand {
     ClearTires,
     /// FR: Request a fast repair   
     FastRepair,
-    /// Uncheck Clean the winshield checkbox
+    /// Uncheck Clean the windshield checkbox
     ClearWS,
     /// Uncheck request a fast repair  
     ClearFR,
@@ -427,7 +429,7 @@ fn pit_amt(a: &Option<i16>) -> isize {
     }
 }
 
-/// You can call this any time, but telemtry only records when driver is in there car
+/// You can call this any time, but telemetry only records when driver is in there car
 #[derive(Debug, ToPrimitive)]
 pub enum TelemCommand {
     /// Turn telemetry recording off
@@ -490,7 +492,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_pitcommand() {
+    fn test_pit_command() {
         assert_eq!(PitCommand::Fuel(Some(12)).params(), (2, 12));
         assert_eq!(PitCommand::Fuel(None).params(), (2, 0));
     }
@@ -503,7 +505,7 @@ mod tests {
         assert_eq!(FFBCommand::MaxForce(-1.0).params(), (0, 0xffff0000));
     }
     #[test]
-    fn test_bcast_msg() {
+    fn test_broadcast_msg() {
         assert_eq!(
             BroadcastMsg::PitCommand(PitCommand::LF(Some(140))).params(),
             (9, (3, 140))
